@@ -1,31 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'features/home/presentation/pages/home_page.dart';
-import 'package:camera/camera.dart';
-import 'features/splash_screen/splash_screen.dart';
-import 'features/victory/presentation/pages/victory_page.dart';
-
-void main() {
-  runApp(MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Emoji Game',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const SplashScreen(),
-        '/home': (context) => const HomePage(),
-        '/victory': (context) => const VictoryPage(),
-      },
-      debugShowCheckedModeBanner: false,
-    );
-  }
-}
 
 class PermissionDeniedApp extends StatelessWidget {
   const PermissionDeniedApp({super.key});
@@ -59,7 +34,7 @@ class PermissionDeniedApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 15),
                 const Text(
-                  "Kami butuh izin kamera untuk memulai game ekspresi wajah. Mohon izinkan akses kamera Anda.",
+                  "Kami butuh izin kamera untuk memulai filter wajah interaktif. Mohon izinkan akses kamera Anda.",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 16, color: Colors.white70),
                 ),

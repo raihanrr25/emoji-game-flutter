@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="kyc_simulation"
+        android:label="Emoji Game Challenge"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
