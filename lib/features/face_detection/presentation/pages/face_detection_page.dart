@@ -3,11 +3,13 @@ import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui';
+import 'package:path_provider/path_provider.dart';
+import '../../../victory/victory_page.dart';
 import '../../domain/models/game_expression.dart';
 import '../../domain/services/camera_service.dart';
 import '../../domain/services/face_detector_service.dart';
 import '../../domain/services/game_service.dart';
-import '../../../victory/presentation/pages/victory_page.dart';
 
 class FaceDetectionPage extends StatefulWidget {
   const FaceDetectionPage({super.key});
@@ -50,6 +52,9 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
   Timer? _expressionTimer;
   Timer? _roundPauseTimer;
   double _expressionProgress = 0.0;
+
+  // Path foto senyum yang berhasil dicapture
+  String? _smilePhotoPath;
 
   @override
   void initState() {
@@ -227,7 +232,7 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
     return mouthHeight / mouthWidth;
   }
 
-  void _checkExpression(Face face) {
+  void _checkExpression(Face face) async {
     // Absolutely no expression checking during round pause
     if (_isInRoundPause) {
       return;
@@ -265,7 +270,12 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
             instructionColor = Colors.greenAccent;
             _expressionProgress = 1.0;
           });
-          _nextExpression();
+          // Tambahan: Capture foto jika ekspresi senyum
+          if (_gameService.requiredExpression == GameExpression.senyum) {
+            await _captureSmilePhotoAndNavigate();
+          } else {
+            _nextExpression();
+          }
         }
       }
     } else {
@@ -282,6 +292,41 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
 
     // Always update the icon based on required expression
     instructionIcon = _gameService.requiredExpression.expressionImage;
+  }
+
+  Future<void> _captureSmilePhotoAndNavigate() async {
+    try {
+      // Stop image stream sebelum capture
+      await _cameraService.cameraController.stopImageStream();
+      final picture = await _cameraService.cameraController.takePicture();
+      // Simpan ke temporary directory
+      final tempDir = await getTemporaryDirectory();
+      final fileName = 'smile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final smilePath = '${tempDir.path}/$fileName';
+      await picture.saveTo(smilePath);
+      // Simpan path ke variabel, JANGAN navigasi ke VictoryPage di sini
+      _smilePhotoPath = smilePath;
+      // Mulai ulang stream kamera untuk ronde berikutnya
+      await _cameraService.cameraController.startImageStream((
+        CameraImage image,
+      ) {
+        if (!isDetecting &&
+            _gameService.isGameStarted &&
+            !_gameService.isGameFinished &&
+            !_isInRoundPause) {
+          isDetecting = true;
+          _processCameraImage(image).then((_) {
+            isDetecting = false;
+          });
+        }
+      });
+      // Lanjut ke ekspresi berikutnya
+      _nextExpression();
+    } catch (e) {
+      print('Error capturing smile photo: $e');
+      // Jika gagal, lanjutkan ke ekspresi berikutnya
+      _nextExpression();
+    }
   }
 
   void _startExpressionTimer() {
@@ -400,124 +445,185 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
           context: context,
           barrierDismissible: false,
           builder:
-              (context) => AlertDialog(
-                backgroundColor: Colors.deepPurple.shade900,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
+              (context) => Dialog(
+                backgroundColor: Colors.transparent,
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 24,
                 ),
-                title: const Text(
-                  '🎉 Game Selesai! 🎉',
-                  style: TextStyle(
-                    color: Colors.amberAccent,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color(0xFF667eea),
+                        Color(0xFF764ba2),
+                        Color(0xFFf093fb),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  textAlign: TextAlign.center,
-                ),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.amberAccent.withOpacity(0.2),
-                            Colors.orange.withOpacity(0.1),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              '🎉 Game Selesai! 🎉',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 26,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.10),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text(
+                                    '🏆 SELAMAT! 🏆',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Anda telah menyelesaikan semua ${_gameService.totalRounds} ronde!',
+                                    style: const TextStyle(color: Colors.white),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    '⏱️ Waktu total: ${_gameService.elapsedTimeInSeconds} detik',
+                                    style: const TextStyle(
+                                      color: Colors.greenAccent,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    '📊 Rata-rata per ronde: ${(_gameService.elapsedTimeInSeconds / _gameService.totalRounds).toStringAsFixed(1)} detik',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                // Main Lagi Button
+                                TextButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    _resetGame();
+                                  },
+                                  icon: const Icon(
+                                    Icons.refresh,
+                                    color: Color(0xFFf093fb),
+                                  ),
+                                  label: const Text(
+                                    'Main Lagi',
+                                    style: TextStyle(
+                                      color: Color(0xFFf093fb),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    backgroundColor: Colors.white.withOpacity(
+                                      0.12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                                // Victory & Share Button
+                                TextButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    // Victory & Share: gunakan path foto senyum yang valid jika ada
+                                    Navigator.of(context).pushReplacement(
+                                      MaterialPageRoute(
+                                        builder:
+                                            (context) => VictoryPage(
+                                              smileImagePath:
+                                                  _smilePhotoPath ?? '',
+                                            ),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.share,
+                                    color: Colors.greenAccent,
+                                  ),
+                                  label: const Text(
+                                    'Victory & Share',
+                                    style: TextStyle(
+                                      color: Colors.greenAccent,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  style: TextButton.styleFrom(
+                                    backgroundColor: Colors.white.withOpacity(
+                                      0.12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            // Home Button di bawah sendiri
+                            SizedBox(
+                              width: double.infinity,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  Navigator.of(context).pop();
+                                  Navigator.of(context).pop();
+                                },
+                                icon: const Icon(
+                                  Icons.home,
+                                  color: Colors.white70,
+                                ),
+                                label: const Text(
+                                  'Home',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                                style: TextButton.styleFrom(
+                                  backgroundColor: Colors.white.withOpacity(
+                                    0.10,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          const Text(
-                            '🏆 SELAMAT! 🏆',
-                            style: TextStyle(
-                              color: Colors.amberAccent,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Anda telah menyelesaikan semua ${_gameService.totalRounds} ronde!',
-                            style: const TextStyle(color: Colors.white),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            '⏱️ Waktu total: ${_gameService.elapsedTimeInSeconds} detik',
-                            style: const TextStyle(
-                              color: Colors.greenAccent,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            '📊 Rata-rata per ronde: ${(_gameService.elapsedTimeInSeconds / _gameService.totalRounds).toStringAsFixed(1)} detik',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
-                actions: [
-                  // Main Lagi Button
-                  TextButton.icon(
-                    onPressed: _resetGame,
-                    icon: const Icon(Icons.refresh, color: Colors.amberAccent),
-                    label: const Text(
-                      'Main Lagi',
-                      style: TextStyle(
-                        color: Colors.amberAccent,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: TextButton.styleFrom(
-                      backgroundColor: Colors.amberAccent.withOpacity(0.1),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  // Victory & Share Button
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop(); // Close dialog
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (context) => const VictoryPage(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.share, color: Colors.greenAccent),
-                    label: const Text(
-                      'Victory & Share',
-                      style: TextStyle(
-                        color: Colors.greenAccent,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: TextButton.styleFrom(
-                      backgroundColor: Colors.greenAccent.withOpacity(0.1),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                  // Home Button
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop(); // Close dialog
-                      Navigator.of(context).pop(true); // Return to home page
-                    },
-                    icon: const Icon(Icons.home, color: Colors.white70),
-                    label: const Text(
-                      'Home',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ],
               ),
         );
       }
@@ -581,36 +687,49 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.deepPurple.shade900,
-        toolbarHeight: 80,
-        centerTitle: true,
-        title: const Text(
-          "Tantangan Ekspresi",
-          style: TextStyle(
-            color: Colors.amberAccent,
-            fontWeight: FontWeight.bold,
-            fontSize: 24,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(80),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF667eea), Color(0xFF764ba2), Color(0xFFf093fb)],
+            ),
           ),
-        ),
-        iconTheme: const IconThemeData(color: Colors.amberAccent),
-        elevation: 0,
-        actions: [
-          if (currentDetectedExpression != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 16.0),
-              child: Center(
-                child: Text(
-                  'Waktu: ${_gameService.elapsedTimeInSeconds}s',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+          child: AppBar(
+            backgroundColor: Colors.transparent,
+            toolbarHeight: 80,
+            centerTitle: true,
+            elevation: 0,
+            title: const Text(
+              "Tantangan Ekspresi",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 24,
+                letterSpacing: 1.2,
               ),
             ),
-        ],
+            iconTheme: const IconThemeData(color: Colors.white),
+            actions: [
+              if (currentDetectedExpression != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 16.0),
+                  child: Center(
+                    child: Text(
+                      'Waktu: ${_gameService.elapsedTimeInSeconds}s',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
       body:
           _cameraService.isInitialized
@@ -647,34 +766,48 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
                     top: 60,
                     left: 0,
                     right: 0,
-                    child: Container(
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 32,
-                            height: 32,
-                            child: instructionIcon,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              instructionText,
-                              style: TextStyle(
-                                color: instructionColor,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              textAlign: TextAlign.center,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                        child: Container(
+                          margin: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFF667eea),
+                                Color(0xFF764ba2),
+                                Color(0xFFf093fb),
+                              ],
                             ),
+                            borderRadius: BorderRadius.circular(16),
                           ),
-                        ],
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 32,
+                                height: 32,
+                                child: instructionIcon,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  instructionText,
+                                  style: TextStyle(
+                                    color: instructionColor,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
