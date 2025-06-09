@@ -4,11 +4,12 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
+import 'package:path_provider/path_provider.dart';
+import '../../../victory/victory_page.dart';
 import '../../domain/models/game_expression.dart';
 import '../../domain/services/camera_service.dart';
 import '../../domain/services/face_detector_service.dart';
 import '../../domain/services/game_service.dart';
-import '../../../victory/presentation/pages/victory_page.dart';
 
 class FaceDetectionPage extends StatefulWidget {
   const FaceDetectionPage({super.key});
@@ -51,6 +52,9 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
   Timer? _expressionTimer;
   Timer? _roundPauseTimer;
   double _expressionProgress = 0.0;
+
+  // Path foto senyum yang berhasil dicapture
+  String? _smilePhotoPath;
 
   @override
   void initState() {
@@ -228,7 +232,7 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
     return mouthHeight / mouthWidth;
   }
 
-  void _checkExpression(Face face) {
+  void _checkExpression(Face face) async {
     // Absolutely no expression checking during round pause
     if (_isInRoundPause) {
       return;
@@ -266,7 +270,12 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
             instructionColor = Colors.greenAccent;
             _expressionProgress = 1.0;
           });
-          _nextExpression();
+          // Tambahan: Capture foto jika ekspresi senyum
+          if (_gameService.requiredExpression == GameExpression.senyum) {
+            await _captureSmilePhotoAndNavigate();
+          } else {
+            _nextExpression();
+          }
         }
       }
     } else {
@@ -283,6 +292,41 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
 
     // Always update the icon based on required expression
     instructionIcon = _gameService.requiredExpression.expressionImage;
+  }
+
+  Future<void> _captureSmilePhotoAndNavigate() async {
+    try {
+      // Stop image stream sebelum capture
+      await _cameraService.cameraController.stopImageStream();
+      final picture = await _cameraService.cameraController.takePicture();
+      // Simpan ke temporary directory
+      final tempDir = await getTemporaryDirectory();
+      final fileName = 'smile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final smilePath = '${tempDir.path}/$fileName';
+      await picture.saveTo(smilePath);
+      // Simpan path ke variabel, JANGAN navigasi ke VictoryPage di sini
+      _smilePhotoPath = smilePath;
+      // Mulai ulang stream kamera untuk ronde berikutnya
+      await _cameraService.cameraController.startImageStream((
+        CameraImage image,
+      ) {
+        if (!isDetecting &&
+            _gameService.isGameStarted &&
+            !_gameService.isGameFinished &&
+            !_isInRoundPause) {
+          isDetecting = true;
+          _processCameraImage(image).then((_) {
+            isDetecting = false;
+          });
+        }
+      });
+      // Lanjut ke ekspresi berikutnya
+      _nextExpression();
+    } catch (e) {
+      print('Error capturing smile photo: $e');
+      // Jika gagal, lanjutkan ke ekspresi berikutnya
+      _nextExpression();
+    }
   }
 
   void _startExpressionTimer() {
@@ -513,10 +557,14 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
                                 TextButton.icon(
                                   onPressed: () {
                                     Navigator.of(context).pop();
+                                    // Victory & Share: gunakan path foto senyum yang valid jika ada
                                     Navigator.of(context).pushReplacement(
                                       MaterialPageRoute(
                                         builder:
-                                            (context) => const VictoryPage(),
+                                            (context) => VictoryPage(
+                                              smileImagePath:
+                                                  _smilePhotoPath ?? '',
+                                            ),
                                       ),
                                     );
                                   },

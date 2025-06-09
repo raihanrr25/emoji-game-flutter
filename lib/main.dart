@@ -4,7 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'features/home/presentation/pages/home_page.dart';
 import 'package:camera/camera.dart';
 import 'features/splash_screen/splash_screen.dart';
-import 'features/victory/presentation/pages/victory_page.dart';
+// import 'features/victory/presentation/pages/victory_page.dart';
 
 void main() {
   runApp(MyApp());
@@ -20,7 +20,8 @@ class MyApp extends StatelessWidget {
       routes: {
         '/': (context) => const SplashScreen(),
         '/home': (context) => const HomePage(),
-        '/victory': (context) => const VictoryPage(),
+        // '/victory': (context) => const VictoryPage(),
+        '/victory': (context) => Container(),
       },
       debugShowCheckedModeBanner: false,
     );
