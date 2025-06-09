@@ -25,6 +25,8 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
   final GameService _gameService = GameService();
   GameExpression? currentDetectedExpression;
 
+  bool _isStreamActive = false;
+
   // State variables
   bool isDetecting = false;
   String instructionText = 'Bersiaplah!';
@@ -55,6 +57,435 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
 
   // Path foto senyum yang berhasil dicapture
   String? _smilePhotoPath;
+
+  bool _isSmileDetectionActive = false;
+  bool _isCapturingSmile = false;
+  double _smileDetectionProgress = 0.0;
+  DateTime? _smileDetectionStartTime;
+  Timer? _smileDetectionTimer;
+  static const Duration _smileHoldDuration = Duration(seconds: 2);
+
+  // 3. Method untuk menampilkan dialog deteksi senyum
+  void _showSmileDetectionDialog() {
+    // Reset detection states
+    _isSmileDetectionActive = false;
+    _isCapturingSmile = false;
+    _smileDetectionProgress = 0.0;
+    _smileDetectionStartTime = null;
+    _smileDetectionTimer?.cancel();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => StatefulBuilder(
+            builder:
+                (context, setState) => Dialog(
+                  backgroundColor: Colors.transparent,
+                  child: Container(
+                    width: MediaQuery.of(context).size.width * 0.9,
+                    height: MediaQuery.of(context).size.height * 0.8,
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white24, width: 2),
+                    ),
+                    child: Column(
+                      children: [
+                        // Header
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xFF667eea), Color(0xFFf093fb)],
+                            ),
+                            borderRadius: BorderRadius.only(
+                              topLeft: Radius.circular(18),
+                              topRight: Radius.circular(18),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.camera_alt,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    '😊 Foto Senyum Otomatis',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _isSmileDetectionActive
+                                    ? (_isCapturingSmile
+                                        ? 'Tahan senyum... ${(_smileDetectionProgress * 100).toInt()}%'
+                                        : 'Tersenyumlah untuk mengambil foto!')
+                                    : 'Tekan "Mulai" lalu tersenyum selama 2 detik',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Camera Preview
+                        Expanded(
+                          child: Stack(
+                            children: [
+                              // Camera preview
+                              if (_cameraService.isInitialized)
+                                Positioned.fill(
+                                  child: ClipRRect(
+                                    child: CameraPreview(
+                                      _cameraService.cameraController,
+                                    ),
+                                  ),
+                                )
+                              else
+                                const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                  ),
+                                ),
+
+                              // Smile detection overlay
+                              if (_isSmileDetectionActive)
+                                Positioned(
+                                  top: 20,
+                                  left: 20,
+                                  right: 20,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          _isCapturingSmile
+                                              ? Colors.green.withOpacity(0.8)
+                                              : Colors.blue.withOpacity(0.8),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Icon(
+                                          _isCapturingSmile
+                                              ? Icons.camera
+                                              : Icons.face,
+                                          color: Colors.white,
+                                          size: 32,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          _isCapturingSmile
+                                              ? 'Memproses senyum...'
+                                              : 'Menunggu senyum...',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        if (_isCapturingSmile) ...[
+                                          const SizedBox(height: 8),
+                                          LinearProgressIndicator(
+                                            value: _smileDetectionProgress,
+                                            backgroundColor: Colors.white30,
+                                            color: Colors.white,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                              // Face detection info
+                              if (_isSmileDetectionActive &&
+                                  smilingProbability != null)
+                                Positioned(
+                                  bottom: 80,
+                                  left: 20,
+                                  right: 20,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      'Smile Level: ${(smilingProbability! * 100).toStringAsFixed(1)}%',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+
+                        // Action Buttons
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: const BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.only(
+                              bottomLeft: Radius.circular(18),
+                              bottomRight: Radius.circular(18),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              // Skip Button
+                              TextButton.icon(
+                                onPressed: () {
+                                  _stopSmileDetection();
+                                  Navigator.of(context).pop();
+                                  Navigator.of(context).pushReplacement(
+                                    MaterialPageRoute(
+                                      builder:
+                                          (context) =>
+                                              VictoryPage(smileImagePath: ''),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(
+                                  Icons.skip_next,
+                                  color: Colors.white70,
+                                ),
+                                label: const Text(
+                                  'Skip',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              ),
+
+                              // Start/Stop Detection Button
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  if (_isSmileDetectionActive) {
+                                    _stopSmileDetection();
+                                    setState(() {});
+                                  } else {
+                                    _startSmileDetection(setState);
+                                  }
+                                },
+                                icon: Icon(
+                                  _isSmileDetectionActive
+                                      ? Icons.stop
+                                      : Icons.play_arrow,
+                                ),
+                                label: Text(
+                                  _isSmileDetectionActive ? 'Stop' : 'Mulai',
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      _isSmileDetectionActive
+                                          ? Colors.red
+                                          : Colors.greenAccent,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+          ),
+    );
+  }
+
+  void _startSmileDetection(StateSetter dialogSetState) {
+    _isSmileDetectionActive = true;
+    _isCapturingSmile = false;
+    _smileDetectionProgress = 0.0;
+    _smileDetectionStartTime = null;
+
+    dialogSetState(() {});
+
+    // Start camera stream untuk deteksi senyum
+    if (_cameraService.isInitialized) {
+      _cameraService.cameraController.startImageStream((CameraImage image) {
+        if (_isSmileDetectionActive && !isDetecting) {
+          isDetecting = true;
+          _processSmileDetection(image, dialogSetState).then((_) {
+            isDetecting = false;
+          });
+        }
+      });
+    }
+  }
+
+  Future<void> _processSmileDetection(
+    CameraImage image,
+    StateSetter dialogSetState,
+  ) async {
+    if (!_isSmileDetectionActive) return;
+
+    final inputImage = _cameraService.getInputImageFromCameraImage(image);
+    final faces = await _faceDetectorService.processImage(inputImage);
+
+    if (!mounted || !_isSmileDetectionActive) return;
+
+    dialogSetState(() {
+      if (faces.isNotEmpty) {
+        final face = faces.first;
+        smilingProbability = face.smilingProbability;
+
+        // Check if smiling (threshold bisa disesuaikan)
+        bool isSmiling = (smilingProbability ?? 0) > 0.7;
+
+        if (isSmiling) {
+          if (_smileDetectionStartTime == null) {
+            // Mulai timer senyum
+            _smileDetectionStartTime = DateTime.now();
+            _isCapturingSmile = true;
+            _startSmileDetectionTimer(dialogSetState);
+          } else {
+            // Update progress
+            final elapsed = DateTime.now().difference(
+              _smileDetectionStartTime!,
+            );
+            _smileDetectionProgress = (elapsed.inMilliseconds /
+                    _smileHoldDuration.inMilliseconds)
+                .clamp(0.0, 1.0);
+
+            if (elapsed >= _smileHoldDuration) {
+              // Senyum cukup lama, ambil foto
+              _captureSmileFromDetection(dialogSetState);
+            }
+          }
+        } else {
+          // Tidak tersenyum, reset timer
+          _resetSmileDetectionTimer();
+          _isCapturingSmile = false;
+          _smileDetectionProgress = 0.0;
+        }
+      } else {
+        // Tidak ada wajah terdeteksi
+        _resetSmileDetectionTimer();
+        _isCapturingSmile = false;
+        _smileDetectionProgress = 0.0;
+        smilingProbability = null;
+      }
+    });
+  }
+
+  void _startSmileDetectionTimer(StateSetter dialogSetState) {
+    _smileDetectionTimer?.cancel();
+    _smileDetectionTimer = Timer.periodic(const Duration(milliseconds: 100), (
+      timer,
+    ) {
+      if (_smileDetectionStartTime != null && _isSmileDetectionActive) {
+        final elapsed = DateTime.now().difference(_smileDetectionStartTime!);
+        final progress = (elapsed.inMilliseconds /
+                _smileHoldDuration.inMilliseconds)
+            .clamp(0.0, 1.0);
+
+        dialogSetState(() {
+          _smileDetectionProgress = progress;
+        });
+
+        if (elapsed >= _smileHoldDuration) {
+          timer.cancel();
+        }
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _resetSmileDetectionTimer() {
+    _smileDetectionStartTime = null;
+    _smileDetectionTimer?.cancel();
+    _smileDetectionProgress = 0.0;
+  }
+
+  Future<void> _captureSmileFromDetection(StateSetter dialogSetState) async {
+    try {
+      // First stop detection without stopping stream
+      _isSmileDetectionActive = false;
+      _isCapturingSmile = false;
+      _resetSmileDetectionTimer();
+
+      dialogSetState(() {
+        _isCapturingSmile = true;
+      });
+
+      if (_cameraService.isInitialized) {
+        try {
+          await _cameraService.cameraController.stopImageStream();
+        } catch (e) {
+          print('Stream may already be stopped: $e');
+        }
+      }
+
+      final picture = await _cameraService.cameraController.takePicture();
+
+      final tempDir = await getTemporaryDirectory();
+      final fileName = 'smile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final smilePath = '${tempDir.path}/$fileName';
+      await picture.saveTo(smilePath);
+
+      _smilePhotoPath = smilePath;
+
+      if (mounted) {
+        // Tutup dialog dan ke VictoryPage
+        debugPrint("smilePath: $_smilePhotoPath");
+        Navigator.of(context).pop();
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => VictoryPage(smileImagePath: _smilePhotoPath!),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error capturing smile: $e');
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Gagal mengambil foto senyum'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => VictoryPage(smileImagePath: ''),
+          ),
+        );
+      }
+    }
+  }
+
+  // 9. Stop smile detection
+  void _stopSmileDetection() {
+    _isSmileDetectionActive = false;
+    _isCapturingSmile = false;
+    _resetSmileDetectionTimer();
+
+    if (_cameraService.isInitialized) {
+      try {
+        _cameraService.cameraController.stopImageStream();
+      } catch (e) {
+        print('Error stopping stream: $e');
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -557,16 +988,20 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
                                 TextButton.icon(
                                   onPressed: () {
                                     Navigator.of(context).pop();
-                                    // Victory & Share: gunakan path foto senyum yang valid jika ada
-                                    Navigator.of(context).pushReplacement(
-                                      MaterialPageRoute(
-                                        builder:
-                                            (context) => VictoryPage(
-                                              smileImagePath:
-                                                  _smilePhotoPath ?? '',
-                                            ),
-                                      ),
-                                    );
+                                    if (_smilePhotoPath != null &&
+                                        _smilePhotoPath!.isNotEmpty) {
+                                      Navigator.of(context).pushReplacement(
+                                        MaterialPageRoute(
+                                          builder:
+                                              (context) => VictoryPage(
+                                                smileImagePath:
+                                                    _smilePhotoPath!,
+                                              ),
+                                        ),
+                                      );
+                                    } else {
+                                      _showSmileDetectionDialog();
+                                    }
                                   },
                                   icon: const Icon(
                                     Icons.share,
@@ -673,10 +1108,13 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
     });
   }
 
+  // ini
+
   @override
   void dispose() {
     _expressionTimer?.cancel();
     _roundPauseTimer?.cancel();
+    _smileDetectionTimer?.cancel();
     _gameService.dispose();
     _faceDetectorService.dispose();
     _cameraService.dispose();
@@ -778,9 +1216,9 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: [
-                                Color(0xFF667eea),
-                                Color(0xFF764ba2),
-                                Color(0xFFf093fb),
+                                Color(0xFF1A0033),
+                                Color(0xFF320040),
+                                Color(0xFF00354D),
                               ],
                             ),
                             borderRadius: BorderRadius.circular(16),

@@ -110,16 +110,14 @@ class _SplashScreenState extends State<SplashScreen>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 AnimatedBuilder(
-                  animation: _rotationAnimation,
+                  animation: _scaleAnimation,
                   builder: (context, child) {
-                    return Transform.rotate(
-                      angle: _rotationAnimation.value * 3.14159,
-                      child: ScaleTransition(
-                        scale: _scaleAnimation,
-                        child: const Text(
-                          '😊',
-                          style: TextStyle(fontSize: 100),
-                        ),
+                    return ScaleTransition(
+                      scale: _scaleAnimation,
+                      child: Image.asset(
+                        'assets/icon/slash_logo.png',
+                        width: 300,
+                        height: 300,
                       ),
                     );
                   },
@@ -128,17 +126,18 @@ class _SplashScreenState extends State<SplashScreen>
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: const Text(
-                    'Sesungguhnya senyum adalah ibadah',
+                    'Jadilah Raja Emoji Berikutnya!!',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 18,
-                      color: Colors.white70,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
                       letterSpacing: 1.0,
                       shadows: [
                         Shadow(
-                          blurRadius: 10.0,
-                          color: Colors.black26,
-                          offset: Offset(2.0, 2.0),
+                          blurRadius: 20.0,
+                          color: Colors.pinkAccent,
+                          offset: Offset(0, 0),
                         ),
                       ],
                     ),

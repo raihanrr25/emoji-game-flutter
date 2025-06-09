@@ -1,5 +1,5 @@
 name: project
-description: "A new Flutter project."
+description: "Emoji Camera - A Flutter application that captures images and detects faces, allowing users to add emojis to their photos."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
@@ -40,6 +40,7 @@ dependencies:
   share_plus: ^7.2.2
   confetti: ^0.7.0
   path_provider: ^2.1.2
+  audioplayers: ^6.4.0
 
 dev_dependencies:
   flutter_test:
@@ -51,6 +52,11 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -65,6 +71,8 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/images/
+    - assets/icon/
+    - assets/audio/
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

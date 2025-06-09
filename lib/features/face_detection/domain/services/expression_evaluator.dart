@@ -216,8 +216,7 @@ class ExpressionEvaluator {
 
     bool isAngry =
         asymmetricAngry ||
-        squintingAngry ||
-        moderateAngry ||
+        squintingAngry && moderateAngry ||
         subtleAngry ||
         intenseStare;
 
@@ -257,7 +256,7 @@ Subtle=$subtleAngry | IntenseStare=$intenseStare | RESULT: $isAngry''');
         veryLowSmile &&
         (avgEyeOpen < 0.6 || (mouthRatio != null && mouthRatio < 0.95));
 
-    bool isSad = strongSad || moderateSad || weakSad;
+    bool isSad = strongSad & moderateSad && weakSad;
 
     debugPrint('''
 [Sad Check] VeryLowSmile: $veryLowSmile ($smile) | LowSmile: $lowSmile | 
