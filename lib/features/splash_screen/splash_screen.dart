@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:ui';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -81,65 +82,79 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF667eea), Color(0xFF764ba2), Color(0xFFf093fb)],
+      body: Stack(
+        children: [
+          // Background Gradient - selaras dengan home page
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF667eea),
+                  Color(0xFF764ba2),
+                  Color(0xFFf093fb),
+                ],
+              ),
+            ),
           ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedBuilder(
-                animation: _rotationAnimation,
-                builder: (context, child) {
-                  return Transform.rotate(
-                    angle: _rotationAnimation.value * 3.14159,
-                    child: ScaleTransition(
-                      scale: _scaleAnimation,
-                      child: const Text('😊', style: TextStyle(fontSize: 100)),
+          // Glassmorphism Effect
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+              child: Container(color: Colors.black.withOpacity(0.1)),
+            ),
+          ),
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedBuilder(
+                  animation: _rotationAnimation,
+                  builder: (context, child) {
+                    return Transform.rotate(
+                      angle: _rotationAnimation.value * 3.14159,
+                      child: ScaleTransition(
+                        scale: _scaleAnimation,
+                        child: const Text(
+                          '😊',
+                          style: TextStyle(fontSize: 100),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: const Text(
+                    'Sesungguhnya senyum adalah ibadah',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.white70,
+                      letterSpacing: 1.0,
+                      shadows: [
+                        Shadow(
+                          blurRadius: 10.0,
+                          color: Colors.black26,
+                          offset: Offset(2.0, 2.0),
+                        ),
+                      ],
                     ),
-                  );
-                },
-              ),
-              const SizedBox(height: 30),
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: const Text(
-                  'Emoji Game Challenge',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 2.0,
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: const Text(
-                  'Siap bermain dengan ekspresi wajah?',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.white70,
-                    letterSpacing: 1.0,
+                const SizedBox(height: 50),
+                FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: const CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                   ),
                 ),
-              ),
-              const SizedBox(height: 50),
-              FadeTransition(
-                opacity: _fadeAnimation,
-                child: const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
