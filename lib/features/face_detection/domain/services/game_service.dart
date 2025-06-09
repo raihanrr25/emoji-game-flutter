@@ -30,14 +30,14 @@ class GameService {
   Function()? onGameCompleted;
 
   GameService({
-    this.totalRounds = 1,
+    this.totalRounds = 6,
     this.availableExpressions = const [
       GameExpression.senyum,
-      //   GameExpression.netral,
-      //   GameExpression.marah,
-      //   GameExpression.sedih,
-      //   GameExpression.kaget,
-      //   GameExpression.ngantuk,
+      GameExpression.netral,
+      GameExpression.marah,
+      GameExpression.sedih,
+      GameExpression.kaget,
+      GameExpression.ngantuk,
     ],
     this.onGameCompleted,
   }) {
