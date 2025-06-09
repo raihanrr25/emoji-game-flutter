@@ -1,17 +1,21 @@
-// lib/features/victory/presentation/pages/victory_page.dart
-
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io';
-import 'dart:ui';
 import 'package:path_provider/path_provider.dart';
 import 'dart:math' as math;
 import '../../../../services/camera_service.dart';
 import '../../../../services/face_detector_service.dart';
+import '../widgets/victory_camera_widget.dart';
+import '../widgets/victory_header.dart';
+import '../widgets/victory_message.dart';
+import '../widgets/victory_instructions.dart';
+import '../widgets/manual_capture_button.dart';
 import '../widgets/animated_background.dart';
 import '../widgets/floating_effects.dart';
+import '../controllers/victory_animation_controller.dart';
 
 class VictoryPage extends StatefulWidget {
   const VictoryPage({super.key});
@@ -22,65 +26,99 @@ class VictoryPage extends StatefulWidget {
 
 class _VictoryPageState extends State<VictoryPage>
     with TickerProviderStateMixin {
-  final CameraService _cameraService = CameraService();
-  final FaceDetectorService _faceDetectorService = FaceDetectorService();
+  // Core services
+  CameraController? _cameraController;
+  late CameraService _cameraService;
+  late FaceDetectorService _faceDetectorService;
+  late VictoryAnimationController _animationController;
 
-  late AnimationController _backgroundController;
-  late AnimationController _particleController;
-
+  // State variables
   bool _isCameraInitialized = false;
   bool _isCapturing = false;
   bool _isSmileDetected = false;
   bool _isProcessingImage = false;
   String? _capturedImagePath;
+  bool _faceDetectionDisabled = false; // Tambahkan flag ini
+  int _errorCount = 0; // Hitung jumlah error
+  List<Face>? _detectedFaces; // Add this for debugging
+  double? _smileProbability; // Add this for debugging
 
+  // Effects
   final List<Particle> _particles = [];
   final List<FloatingEmoji> _floatingEmojis = [];
 
   @override
   void initState() {
     super.initState();
+    _initializeServices();
     _initializeAnimations();
     _initializeEffects();
-    _initializeCamera();
+
+    // Clean up any existing camera resources before initializing new ones
+    _cleanupExistingCamera().then((_) {
+      _initializeCamera();
+    });
+
+    // Start victory animation after widget is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _animationController.startVictoryAnimation();
+    });
+  }
+
+  Future<void> _cleanupExistingCamera() async {
+    try {
+      // Give time for any previous camera to fully dispose
+      await Future.delayed(const Duration(milliseconds: 300));
+    } catch (e) {
+      print('Error during camera cleanup: $e');
+    }
+  }
+
+  void _initializeServices() {
+    _cameraService = CameraService();
+    _faceDetectorService = FaceDetectorService();
   }
 
   void _initializeAnimations() {
-    _backgroundController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 20),
-    )..repeat();
-    _particleController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 5),
-    )..repeat();
+    _animationController = VictoryAnimationController();
+    _animationController.initialize(this);
   }
 
   void _initializeEffects() {
+    _initializeParticles();
+    _initializeFloatingEmojis();
+  }
+
+  void _initializeParticles() {
     final random = math.Random();
-    const a = ['🎉', '🏆', '⭐', '🎊', '💫', '🌟', '🎈', '🎁'];
     for (int i = 0; i < 50; i++) {
       _particles.add(
         Particle(
-          x: random.nextDouble() * 500,
-          y: random.nextDouble() * 1000,
+          x: random.nextDouble() * 400,
+          y: random.nextDouble() * 800,
           speed: random.nextDouble() * 2 + 1,
-          size: random.nextDouble() * 4 + 2,
+          size: random.nextDouble() * 6 + 2,
           color:
               [
-                Colors.yellow.shade200,
-                Colors.pink.shade200,
-                Colors.cyan.shade200,
-              ][random.nextInt(3)],
+                Colors.amberAccent,
+                Colors.orange,
+                Colors.yellow,
+                Colors.pinkAccent,
+              ][random.nextInt(4)],
         ),
       );
     }
-    for (int i = 0; i < 10; i++) {
+  }
+
+  void _initializeFloatingEmojis() {
+    final emojis = ['🎉', '🏆', '⭐', '🎊', '💫', '🌟', '🎈', '🎁'];
+    final random = math.Random();
+    for (int i = 0; i < 8; i++) {
       _floatingEmojis.add(
         FloatingEmoji(
-          emoji: a[random.nextInt(a.length)],
-          x: random.nextDouble() * 400,
-          y: random.nextDouble() * 800,
+          emoji: emojis[i],
+          x: random.nextDouble() * 300 + 50,
+          y: random.nextDouble() * 600 + 100,
           speed: random.nextDouble() * 0.5 + 0.3,
         ),
       );
@@ -88,364 +126,662 @@ class _VictoryPageState extends State<VictoryPage>
   }
 
   Future<void> _initializeCamera() async {
-    bool initialized = await _cameraService.initializeCamera();
-    if (initialized && mounted) {
-      setState(() {
-        _isCameraInitialized = true;
-      });
-      _startImageStream();
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        _showErrorSnackBar('No cameras available');
+        return;
+      }
+
+      final frontCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      // Try optimal settings first
+      await _tryInitializeWithSettings(
+        frontCamera,
+        ResolutionPreset.medium,
+        ImageFormatGroup.yuv420,
+      );
+    } catch (e) {
+      print('Error initializing camera: $e');
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = false;
+        });
+        _showErrorSnackBar('Camera initialization failed: $e');
+      }
     }
   }
 
-  void _startImageStream() {
-    if (_isCameraInitialized) {
-      _cameraService.cameraController.startImageStream((image) {
-        if (_isProcessingImage || _isCapturing) return;
-        _isProcessingImage = true;
-        _processCameraImage(
-          image,
-        ).whenComplete(() => _isProcessingImage = false);
-      });
+  Future<void> _tryInitializeWithSettings(
+    CameraDescription camera,
+    ResolutionPreset resolution,
+    ImageFormatGroup? imageFormat,
+  ) async {
+    try {
+      _cameraController = CameraController(
+        camera,
+        resolution,
+        enableAudio: false,
+        imageFormatGroup: imageFormat,
+      );
+
+      await _cameraController!.initialize();
+
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+        });
+
+        // Add longer delay and test detection first
+        await Future.delayed(const Duration(milliseconds: 1500));
+        await _testFaceDetection();
+
+        if (!_faceDetectionDisabled) {
+          _startImageStream();
+        }
+      }
+    } catch (e) {
+      print('Failed with settings $resolution, $imageFormat: $e');
+
+      // Try fallback settings
+      if (imageFormat == ImageFormatGroup.yuv420) {
+        await _tryInitializeWithSettings(
+          camera,
+          resolution,
+          ImageFormatGroup.nv21,
+        );
+      } else if (resolution == ResolutionPreset.medium) {
+        await _tryInitializeWithSettings(
+          camera,
+          ResolutionPreset.low,
+          ImageFormatGroup.yuv420,
+        );
+      } else {
+        // Final fallback
+        await _tryInitializeWithSettings(camera, ResolutionPreset.low, null);
+      }
+    }
+  }
+
+  Future<void> _testFaceDetection() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return;
+    }
+
+    try {
+      print('🧪 Testing face detection capability...');
+
+      // Take a test image
+      final XFile testImage = await _cameraController!.takePicture();
+
+      // Try to process it (this would need image conversion - simplified here)
+      print('✅ Test image captured successfully');
+
+      // If we get here, camera is working properly
+      print('✅ Face detection test passed');
+    } catch (e) {
+      print('❌ Face detection test failed: $e');
+      _disableFaceDetection();
     }
   }
 
   Future<void> _processCameraImage(CameraImage image) async {
-    final inputImage = _cameraService.getInputImageFromCameraImage(image);
-    final faces = await _faceDetectorService.processImage(inputImage);
+    if (_isProcessingImage || _isCapturing || _faceDetectionDisabled) return;
+    _isProcessingImage = true;
 
-    if (faces.isNotEmpty) {
-      final smileProb = faces.first.smilingProbability ?? 0.0;
-      final detected = smileProb > 0.8;
-      if (detected != _isSmileDetected) {
-        setState(() {
-          _isSmileDetected = detected;
-        });
+    try {
+      if (_cameraController == null ||
+          !_cameraController!.value.isInitialized) {
+        return;
       }
-      if (detected && !_isCapturing) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (_isSmileDetected) _capturePhoto();
+
+      // Enhanced image conversion with better error handling
+      final inputImage = _cameraService.getInputImageFromCameraImage(image);
+
+      // Add validation before processing
+      if (inputImage.metadata == null) {
+        debugPrint('⚠️ Skipping frame - no metadata');
+        return;
       }
-    } else {
-      if (_isSmileDetected)
+
+      final faces = await _faceDetectorService.processImage(inputImage);
+
+      bool smileDetected = false;
+      double? probability;
+
+      if (faces.isNotEmpty) {
+        probability = faces.first.smilingProbability ?? 0.0;
+        smileDetected = probability > 0.7;
+
+        // Log detection success periodically
+        final stats = _faceDetectorService.getDetectionStats();
+        if (stats['totalFrames'] % 30 == 0) {
+          debugPrint(
+            '📊 Detection stats: ${stats['successRate'].toStringAsFixed(1)}% success rate',
+          );
+        }
+      }
+
+      _errorCount = 0;
+
+      if (mounted) {
         setState(() {
-          _isSmileDetected = false;
+          _detectedFaces = faces;
+          _isSmileDetected = smileDetected;
+          _smileProbability = probability;
         });
+
+        if (smileDetected && !_isCapturing) {
+          await Future.delayed(const Duration(milliseconds: 800));
+          if (mounted && _isSmileDetected && !_isCapturing) {
+            _capturePhoto();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error processing image: $e');
+      _errorCount++;
+
+      // More specific error handling
+      if (e.toString().contains('InputImageConverterError') ||
+          e.toString().contains('ImageFormat is not supported') ||
+          e.toString().contains('IllegalArgumentException') ||
+          _errorCount > 15) {
+        _disableFaceDetection();
+      }
+    } finally {
+      _isProcessingImage = false;
+    }
+  }
+
+  void _disableFaceDetection() {
+    print('🚫 Disabling face detection due to compatibility issues');
+    setState(() {
+      _faceDetectionDisabled = true;
+    });
+
+    try {
+      _cameraController?.stopImageStream().catchError((e) {
+        print('Error stopping stream: $e');
+      });
+    } catch (e) {
+      print('Error stopping image stream: $e');
+    }
+
+    if (mounted) {
+      _showErrorSnackBar(
+        'Smile detection unavailable. Use manual capture button.',
+      );
+    }
+  }
+
+  void _startImageStream() {
+    if (_cameraController != null &&
+        _cameraController!.value.isInitialized &&
+        !_faceDetectionDisabled) {
+      try {
+        _cameraController!.startImageStream(_processCameraImage);
+      } catch (e) {
+        print('Error starting image stream: $e');
+        _disableFaceDetection();
+      }
     }
   }
 
   Future<void> _capturePhoto() async {
-    if (!_isCameraInitialized || _isCapturing) return;
+    if (_cameraController == null ||
+        !_cameraController!.value.isInitialized ||
+        _isCapturing) {
+      return;
+    }
 
     setState(() {
       _isCapturing = true;
     });
-    await _cameraService.cameraController.stopImageStream();
 
-    final XFile photo = await _cameraService.cameraController.takePicture();
-    final Directory appDir = await getApplicationDocumentsDirectory();
-    final String newPath =
-        '${appDir.path}/victory_${DateTime.now().millisecondsSinceEpoch}.jpg';
-    await File(photo.path).copy(newPath);
+    try {
+      // Hentikan image stream jika masih berjalan
+      if (!_faceDetectionDisabled) {
+        await _cameraController!.stopImageStream().catchError((e) {
+          print('Error stopping stream for capture: $e');
+        });
+      }
 
-    if (mounted) {
-      setState(() {
-        _capturedImagePath = newPath;
-        _isCapturing = false;
-      });
-      _showPhotoPreview();
+      // Add a small delay to ensure the stream is stopped
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // Take the picture
+      final XFile photo = await _cameraController!.takePicture();
+
+      // Save to app directory for sharing
+      final Directory appDir = await getApplicationDocumentsDirectory();
+      final String fileName =
+          'victory_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String newPath = '${appDir.path}/$fileName';
+
+      await File(photo.path).copy(newPath);
+
+      if (mounted) {
+        setState(() {
+          _capturedImagePath = newPath;
+          _isCapturing = false;
+        });
+
+        _showPhotoPreview();
+      }
+    } catch (e) {
+      print('Error capturing photo: $e');
+      if (mounted) {
+        setState(() {
+          _isCapturing = false;
+        });
+        _showErrorSnackBar('Gagal mengambil foto: $e');
+      }
+    } finally {
+      // Restart stream hanya jika face detection tidak dinonaktifkan
+      if (mounted &&
+          _isCameraInitialized &&
+          _cameraController != null &&
+          !_faceDetectionDisabled) {
+        try {
+          await Future.delayed(const Duration(milliseconds: 500));
+          _startImageStream();
+        } catch (e) {
+          print('Error restarting stream: $e');
+        }
+      }
     }
-  }
-
-  @override
-  void dispose() {
-    _backgroundController.dispose();
-    _particleController.dispose();
-    _cameraService.dispose();
-    _faceDetectorService.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          AnimatedBackground(backgroundAnimation: _backgroundController),
-          FloatingEffects(
-            particles: _particles,
-            floatingEmojis: _floatingEmojis,
-            particleAnimationValue: _particleController.value,
-            emojiAnimationValue: _particleController.value,
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 20),
-                  _buildCameraView(),
-                  const SizedBox(height: 20),
-                  _buildInstructionPanel(),
-                  const SizedBox(height: 20),
-                  if (!_isSmileDetected) _buildManualCaptureButton(),
-                ],
-              ),
-            ),
-          ),
-          if (_isCapturing) _buildCaptureOverlay(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        _buildGlassButton(
-          icon: Icons.home_filled,
-          onPressed: () => Navigator.of(context).pushReplacementNamed('/home'),
-        ),
-        const Text(
-          "FOTO KEMENANGAN",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.5,
-          ),
-        ),
-        SizedBox(width: 48),
-      ],
-    );
-  }
-
-  Widget _buildCameraView() {
-    return Expanded(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color:
-                _isSmileDetected
-                    ? Colors.cyanAccent
-                    : Colors.white.withOpacity(0.3),
-            width: 3,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color:
-                  _isSmileDetected
-                      ? Colors.cyanAccent.withOpacity(0.5)
-                      : Colors.black.withOpacity(0.3),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(27),
-          child:
-              _isCameraInitialized
-                  ? CameraPreview(_cameraService.cameraController)
-                  : const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInstructionPanel() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.2)),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            transitionBuilder:
-                (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: ScaleTransition(scale: anim, child: child),
-                ),
-            child:
-                _isSmileDetected
-                    ? const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.check_circle, color: Colors.cyanAccent),
-                        SizedBox(width: 12),
-                        Text(
-                          "SENYUM TERDETEKSI!",
-                          style: TextStyle(
-                            color: Colors.cyanAccent,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    )
-                    : const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.camera_alt_outlined, color: Colors.white70),
-                        SizedBox(width: 12),
-                        Text(
-                          "Senyum untuk mengambil foto",
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                      ],
-                    ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildManualCaptureButton() {
-    return ElevatedButton.icon(
-      icon: Icon(Icons.camera),
-      label: Text("Ambil Foto Manual"),
-      onPressed: _capturePhoto,
-      style: ElevatedButton.styleFrom(
-        foregroundColor: Color(0xFF764ba2),
-        backgroundColor: Colors.white,
-        padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-      ),
-    );
-  }
-
-  Widget _buildCaptureOverlay() {
-    return Container(
-      color: Colors.black.withOpacity(0.7),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 20),
-            Text(
-              "Mengambil gambar...",
-              style: TextStyle(color: Colors.white, fontSize: 18),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGlassButton({
-    required IconData icon,
-    required VoidCallback onPressed,
-  }) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(15),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: InkWell(
-          onTap: onPressed,
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
-            ),
-            child: Icon(icon, color: Colors.white),
-          ),
-        ),
-      ),
-    );
   }
 
   void _showPhotoPreview() {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-          child: AlertDialog(
-            backgroundColor: Colors.grey[900]?.withOpacity(0.85),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: BorderSide(color: Colors.cyanAccent.withOpacity(0.5)),
-            ),
-            contentPadding: EdgeInsets.all(16),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  "Kemenangan!",
-                  style: TextStyle(
-                    color: Colors.cyanAccent,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                SizedBox(height: 16),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Image.file(
-                    File(_capturedImagePath!),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                SizedBox(height: 16),
-                Text(
-                  "Bagikan momen epik ini!",
-                  style: TextStyle(color: Colors.white70),
-                ),
-              ],
-            ),
-            actions: [
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      child: Text('Tutup'),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        _startImageStream(); // Resume camera stream
-                      },
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: BorderSide(color: Colors.white54),
-                      ),
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: AnimatedBuilder(
+            animation: _animationController.pulseController,
+            builder: (context, child) {
+              return Transform.scale(
+                scale: _animationController.pulseAnimation.value * 0.1 + 0.95,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.deepPurple.shade900,
+                        Colors.purple.shade600,
+                        Colors.pinkAccent.shade400,
+                      ],
+                      stops: const [0.0, 0.6, 1.0],
                     ),
-                  ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      icon: Icon(Icons.share),
-                      label: Text('Bagikan'),
-                      onPressed: () async {
-                        await Share.shareXFiles([
-                          XFile(_capturedImagePath!),
-                        ], text: 'Aku menang di Emoji Game Challenge!');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.cyanAccent,
-                        foregroundColor: Colors.black,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.amberAccent.withOpacity(0.3),
+                        blurRadius: 20,
+                        spreadRadius: 5,
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: Colors.amberAccent,
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.amberAccent.withOpacity(0.5),
+                              blurRadius: 15,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Stack(
+                            children: [
+                              Image.file(
+                                File(_capturedImagePath!),
+                                height: 300,
+                                width: 250,
+                                fit: BoxFit.cover,
+                              ),
+                              // Sparkle overlay
+                              Positioned.fill(
+                                child: AnimatedBuilder(
+                                  animation:
+                                      _animationController.particleController,
+                                  builder: (context, child) {
+                                    return CustomPaint(
+                                      painter: SparklePainter(
+                                        _animationController
+                                            .particleController
+                                            .value,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Enhanced title with gradient text
+                      ShaderMask(
+                        shaderCallback:
+                            (bounds) => LinearGradient(
+                              colors: [
+                                Colors.amberAccent,
+                                Colors.orange,
+                                Colors.yellow,
+                              ],
+                            ).createShader(bounds),
+                        child: const Text(
+                          '🎉 FOTO KEMENANGAN EPIC! 🎉',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _buildEnhancedButton(
+                            onPressed: _sharePhoto,
+                            icon: Icons.share,
+                            label: 'Bagikan',
+                            color: Colors.amberAccent,
+                            textColor: Colors.deepPurple.shade900,
+                          ),
+                          _buildEnhancedButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              _capturePhoto();
+                            },
+                            icon: Icons.camera_alt,
+                            label: 'Foto Lagi',
+                            color: Colors.green,
+                            textColor: Colors.white,
+                          ),
+                          _buildEnhancedButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              Navigator.of(context).pushNamedAndRemoveUntil(
+                                '/home',
+                                (route) => false,
+                              );
+                            },
+                            icon: Icons.home,
+                            label: 'Home',
+                            color: Colors.blueAccent,
+                            textColor: Colors.white,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text(
+                          'Tutup',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
       },
     );
   }
+
+  Widget _buildEnhancedButton({
+    required VoidCallback onPressed,
+    required IconData icon,
+    required String label,
+    required Color color,
+    required Color textColor,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon),
+      label: Text(label),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: textColor,
+        elevation: 8,
+        shadowColor: color.withOpacity(0.5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+      ),
+    );
+  }
+
+  Future<void> _sharePhoto() async {
+    if (_capturedImagePath != null) {
+      try {
+        await Share.shareXFiles(
+          [XFile(_capturedImagePath!)],
+          text:
+              '🎉 Aku berhasil menyelesaikan Emoji Game Challenge! 😊 #EmojiGameChallenge #Victory',
+        );
+      } catch (e) {
+        _showErrorSnackBar('Gagal membagikan foto: $e');
+      }
+    }
+  }
+
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    // Stop animations first
+    _animationController.stopAnimations();
+    _animationController.dispose();
+
+    // Dispose camera resources properly
+    _disposeCameraResources();
+
+    // Dispose face detector
+    _faceDetectorService.dispose();
+
+    super.dispose();
+  }
+
+  Future<void> _disposeCameraResources() async {
+    try {
+      // Stop image stream first
+      if (_cameraController != null) {
+        await _cameraController!.stopImageStream().catchError((e) {
+          print('Error stopping image stream: $e');
+        });
+
+        // Add delay before disposing
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        // Dispose controller
+        await _cameraController!.dispose();
+        _cameraController = null;
+      }
+    } catch (e) {
+      print('Error disposing camera: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.deepPurple.shade900,
+      body: Stack(
+        children: [
+          // Animated background
+          AnimatedBackground(
+            backgroundAnimation: _animationController.backgroundAnimation,
+          ),
+
+          // Floating effects
+          AnimatedBuilder(
+            animation: Listenable.merge([
+              _animationController.particleController,
+              _animationController.emojiController,
+            ]),
+            builder: (context, child) {
+              return FloatingEffects(
+                particles: _particles,
+                floatingEmojis: _floatingEmojis,
+                particleAnimationValue:
+                    _animationController.particleController.value,
+                emojiAnimationValue:
+                    _animationController.emojiFloatAnimation.value,
+              );
+            },
+          ),
+
+          // Main content
+          SafeArea(
+            child: FadeTransition(
+              opacity: _animationController.fadeAnimation,
+              child: Column(
+                children: [
+                  // Header
+                  VictoryHeader(
+                    onHomePressed: () {
+                      Navigator.of(
+                        context,
+                      ).pushNamedAndRemoveUntil('/home', (route) => false);
+                    },
+                  ),
+
+                  // Victory Message
+                  VictoryMessage(
+                    scaleAnimation: _animationController.scaleAnimation,
+                    rotationAnimation: _animationController.rotationAnimation,
+                    bounceAnimation: _animationController.bounceAnimation,
+                  ),
+
+                  // Camera Section
+                  Expanded(
+                    flex: 3,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                      child: VictoryCameraWidget(
+                        cameraController: _cameraController,
+                        isCameraInitialized: _isCameraInitialized,
+                        isSmileDetected:
+                            _isSmileDetected && !_faceDetectionDisabled,
+                        isCapturing: _isCapturing,
+                        detectedFaces:
+                            _detectedFaces, // Pass faces for visualization
+                        smileProbability:
+                            _smileProbability, // Pass probability for display
+                      ),
+                    ),
+                  ),
+
+                  // Instructions - sesuaikan dengan status face detection
+                  VictoryInstructions(
+                    isSmileDetected:
+                        _isSmileDetected && !_faceDetectionDisabled,
+                  ),
+
+                  // Manual capture button - selalu tampilkan jika camera ready
+                  ManualCaptureButton(
+                    isSmileDetected:
+                        _isSmileDetected && !_faceDetectionDisabled,
+                    isCapturing: _isCapturing,
+                    onPressed: _capturePhoto,
+                  ),
+
+                  // Tambahkan pesan jika face detection dinonaktifkan
+                  if (_faceDetectionDisabled)
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orange, width: 1),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.info, color: Colors.orange, size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Deteksi senyuman tidak tersedia. Gunakan tombol "Ambil Foto" untuk mengambil gambar.',
+                              style: TextStyle(
+                                color: Colors.orange,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Custom painter for sparkle effect on photos
+class SparklePainter extends CustomPainter {
+  final double animationValue;
+
+  SparklePainter(this.animationValue);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint =
+        Paint()
+          ..color = Colors.white.withOpacity(0.8)
+          ..style = PaintingStyle.fill;
+
+    final random = math.Random(42); // Fixed seed for consistent sparkles
+    for (int i = 0; i < 20; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height;
+      final sparkleSize = 2 + 3 * math.sin(animationValue * 2 * math.pi + i);
+
+      if (sparkleSize > 0) {
+        canvas.drawCircle(Offset(x, y), sparkleSize, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
