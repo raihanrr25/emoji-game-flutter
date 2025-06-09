@@ -464,7 +464,11 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
                 actions: [
                   // Main Lagi Button
                   TextButton.icon(
-                    onPressed: _resetGame,
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      // Tutup dialog dan restart game
+                      _resetGame();
+                    },
                     icon: const Icon(Icons.refresh, color: Colors.amberAccent),
                     label: const Text(
                       'Main Lagi',
@@ -508,8 +512,10 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
                   // Home Button
                   TextButton.icon(
                     onPressed: () {
+                      // Tutup dialog dan kembali ke home page
                       Navigator.of(context).pop(); // Close dialog
-                      Navigator.of(context).pop(true); // Return to home page
+                      Navigator.of(context).pop();
+                      Navigator.of(context).pop();
                     },
                     icon: const Icon(Icons.home, color: Colors.white70),
                     label: const Text(
