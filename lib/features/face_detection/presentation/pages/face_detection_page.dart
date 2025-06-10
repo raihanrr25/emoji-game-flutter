@@ -48,7 +48,7 @@ class _FaceDetectionPageState extends State<FaceDetectionPage> {
   // Expression timing
   DateTime? _expressionStartTime;
   bool _isExpressionValid = false;
-  static const Duration _requiredHoldDuration = Duration(seconds: 2);
+  static const Duration _requiredHoldDuration = Duration(milliseconds: 500);
   static const Duration _roundPauseDuration = Duration(seconds: 2);
   bool _isInRoundPause = false;
   Timer? _expressionTimer;
