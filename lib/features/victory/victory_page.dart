@@ -159,10 +159,10 @@ class _VictoryPageState extends State<VictoryPage> {
                             onPressed: () async {
                               // Siapkan teks share dengan detail tambahan
                               String shareText =
-                                  'Selamat! Saya berhasil menyelesaikan Emoji Game '
+                                  'Saya berhasil menyelesaikan Emoji Game '
                                   'dengan senyum terbaikku! '
                                   '${widget.elapsedTimeInSeconds != null ? "Waktu: ${widget.elapsedTimeInSeconds} detik. " : ""}'
-                                  '#EmojiGame #Senyum #Flutter';
+                                  '#EmojiGame #Senyum #mobilegame';
                               await Share.shareXFiles([
                                 XFile(widget.smileImagePath),
                               ], text: shareText);
